@@ -10,4 +10,5 @@ authRouter.get("/get-me", authController.GetMe)
 authRouter.get("/refresh-token", authController.refreshToken)
 authRouter.get("/logout", authController.logout)
 authRouter.get("/logout-all", authController.logoutAll)
+authRouter.get("/verify-email", authController.verifyEmail)
 export default authRouter
