@@ -5,6 +5,7 @@ const authRouter = Router()
  * POST /api/auth/register
  */
 authRouter.post("/register", authController.register)
+authRouter.post("/login", authController.login)
 authRouter.get("/get-me", authController.GetMe)
 authRouter.get("/refresh-token", authController.refreshToken)
 authRouter.get("/logout", authController.logout)
