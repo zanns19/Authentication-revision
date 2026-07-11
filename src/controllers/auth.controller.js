@@ -66,12 +66,12 @@ export async function login(req, res) {
         })
     }
 
-    if (!user.verified) {
-        return res.status(401).json({
-            message: "Email not verified"
-        })
-    }
-
+    // if (!user.verified) {
+    //     return res.status(401).json({
+    //         message: "Email not verified"
+    //     })
+    // }
+    try{
     const hashedPassword = crypto.createHash("sha256").update(password).digest("hex");
 
     const isPasswordValid = hashedPassword === user.password;
@@ -123,6 +123,11 @@ export async function login(req, res) {
         },
         accessToken,
     })
+} catch (error) {
+    return res.status(401).json({
+        message: "Invalid or expired refresh token",
+    });
+}
 }
 
 export async function GetMe(req, res) {
