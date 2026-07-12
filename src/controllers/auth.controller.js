@@ -155,7 +155,6 @@ export async function login(req, res) {
         });
     }
 }
-
 export async function GetMe(req, res) {
     const token = req.headers.authorization?.split(" ")[1];
     if (!token) {
@@ -339,9 +338,15 @@ export async function verifyEmail(req, res) {
         })
     }
 
-    const user = await userModel.findByIdAndUpdate(otpDoc.user, {
+    const user = await userModel.findByIdAndUpdate(
+    otpDoc.user,
+    {
         verified: true
-    })
+    },
+    {
+        new: true
+    }
+)
 
     await otpModel.deleteMany({
         user: otpDoc.user
