@@ -1,5 +1,6 @@
 import userModel from "../models/user.model.js";
 import crypto from "crypto";
+import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import config from "../config/config.js";
 import sessionModel from "../models/session.model.js";
@@ -27,7 +28,9 @@ export async function register(req, res) {
         })
     }
 
-    const hashedPassword = crypto.createHash("sha256").update(password).digest("hex");
+    const saltRounds = 10;
+
+const hashedPassword = await bcrypt.hash(password, saltRounds);
 
     const user = await userModel.create({
         username,
@@ -79,7 +82,9 @@ export async function login(req, res) {
         }
 
         // Hash password
-        const hashedPassword = crypto.createHash("sha256").update(password).digest("hex");
+        const saltRounds = 10;
+
+const hashedPassword = await bcrypt.hash(password, saltRounds);
 
         // Compare password
         if (hashedPassword !== user.password) {
