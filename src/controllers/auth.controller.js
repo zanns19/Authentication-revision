@@ -1,4 +1,3 @@
-import mongoose from "mongoose";
 import userModel from "../models/user.model.js";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
@@ -23,7 +22,7 @@ export async function register(req, res) {
     })
 
     if (isAlreadyRegistered) {
-        res.status(409).json({
+        return res.status(409).json({
             message: "Username or email already exists"
         })
     }
@@ -60,78 +59,101 @@ export async function register(req, res) {
 
 }
 export async function login(req, res) {
-  const { email, password } = req.body;
+    try {
+        const { email, password } = req.body;
 
-    const user = await userModel.findOne({ email })
+        // Find user
+        const user = await userModel.findOne({ email });
 
-    if (!user) {
-        return res.status(401).json({
-            message: "Invalid email or password"
-        })
-    }
-
-    if (!user.verified) {
-        return res.status(401).json({
-            message: "Email not verified"
-        })
-    }
-    try{
-    const hashedPassword = crypto.createHash("sha256").update(password).digest("hex");
-
-    const isPasswordValid = hashedPassword === user.password;
-
-    if (!isPasswordValid) {
-        return res.status(401).json({
-            message: "Invalid email or password"
-        })
-    }
-
-    const refreshToken = jwt.sign({
-        id: user._id
-    }, config.JWT_SECRET,
-        {
-            expiresIn: "7d"
+        if (!user) {
+            return res.status(401).json({
+                message: "Invalid email or password",
+            });
         }
-    )
 
-    const refreshTokenHash = crypto.createHash("sha256").update(refreshToken).digest("hex");
-
-    const session = await sessionModel.create({
-        user: user._id,
-        refreshTokenHash,
-        ip: req.ip,
-        userAgent: req.headers[ "user-agent" ]
-    })
-
-    const accessToken = jwt.sign({
-        id: user._id,
-        sessionId: session._id
-    }, config.JWT_SECRET,
-        {
-            expiresIn: "15m"
+        // Check email verification
+        if (!user.verified) {
+            return res.status(401).json({
+                message: "Email not verified",
+            });
         }
-    )
 
-    res.cookie("refreshToken", refreshToken, {
-        httpOnly: true,
-        secure: true,
-        sameSite: "strict",
-        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-    })
+        // Hash password
+        const hashedPassword = crypto.createHash("sha256").update(password).digest("hex");
 
-    res.status(200).json({
-        message: "Logged in successfully",
-        user: {
-            username: user.username,
-            email: user.email,
-        },
-        accessToken,
-    })
-} catch (error) {
-    return res.status(401).json({
-        message: "Invalid or expired refresh token",
-    });
-}
+        // Compare password
+        if (hashedPassword !== user.password) {
+            return res.status(401).json({
+                message: "Invalid email or password",
+            });
+        }
+
+        // Create session first
+        const session = await sessionModel.create({
+            user: user._id,
+            refreshTokenHash: "temp",
+            ip: req.ip,
+            userAgent: req.headers["user-agent"],
+        });
+
+        // Generate Refresh Token
+        const refreshToken = jwt.sign(
+            {
+                id: user._id,
+                sessionId: session._id,
+            },
+            config.JWT_SECRET,
+            {
+                expiresIn: "7d",
+            }
+        );
+
+        // Hash Refresh Token
+        const refreshTokenHash = crypto
+            .createHash("sha256")
+            .update(refreshToken)
+            .digest("hex");
+
+        // Save hash in session
+        session.refreshTokenHash = refreshTokenHash;
+        await session.save();
+
+        // Generate Access Token
+        const accessToken = jwt.sign(
+            {
+                id: user._id,
+                sessionId: session._id,
+            },
+            config.JWT_SECRET,
+            {
+                expiresIn: "15m",
+            }
+        );
+
+        // Store Refresh Token in Cookie
+        res.cookie("refreshToken", refreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "strict",
+            maxAge: 7 * 24 * 60 * 60 * 1000,
+        });
+
+        return res.status(200).json({
+            message: "Logged in successfully",
+            user: {
+                username: user.username,
+                email: user.email,
+            },
+            accessToken,
+        });
+
+    } catch (error) {
+        console.error("Login Error:", error);
+
+        return res.status(500).json({
+            message: "Internal server error",
+        });
+    }
 }
 
 export async function GetMe(req, res) {
@@ -150,6 +172,11 @@ export async function GetMe(req, res) {
         })
     }
     const user = await userModel.findById(decoded.id)
+    if(!user){
+    return res.status(404).json({
+        message:"User not found"
+    })
+}
     res.status(200).json({
         message: "User Fetch Successfully!",
         user: {
@@ -160,7 +187,7 @@ export async function GetMe(req, res) {
     })
 } catch (error) {
     return res.status(401).json({
-        message: "Invalid or expired refresh token",
+        message: "Invalid or expired access token"
     });
 }
 
@@ -224,37 +251,44 @@ export async function refreshToken(req, res) {
     }
 }
 export async function logout(req, res) {
-
     const refreshToken = req.cookies.refreshToken;
 
     if (!refreshToken) {
         return res.status(400).json({
             message: "Refresh token not found"
-        })
+        });
     }
 
-    const refreshTokenHash = crypto.createHash("sha256").update(refreshToken).digest("hex");
+    try {
+        jwt.verify(refreshToken, config.JWT_SECRET);
 
-    const session = await sessionModel.findOne({
-        refreshTokenHash,
-        revoked: false
-    })
+        const refreshTokenHash = crypto.createHash("sha256").update(refreshToken).digest("hex");
 
-    if (!session) {
-        return res.status(400).json({
-            message: "Invalid refresh token"
-        })
+        const session = await sessionModel.findOne({
+            refreshTokenHash,
+            revoked: false
+        });
+
+        if (!session) {
+            return res.status(400).json({
+                message: "Invalid refresh token"
+            });
+        }
+
+        session.revoked = true;
+        await session.save();
+
+        res.clearCookie("refreshToken");
+
+        return res.status(200).json({
+            message: "Logged out successfully"
+        });
+
+    } catch (error) {
+        return res.status(401).json({
+            message: "Invalid or expired refresh token"
+        });
     }
-
-    session.revoked = true;
-    await session.save();
-
-    res.clearCookie("refreshToken")
-
-    res.status(200).json({
-        message: "Logged out successfully"
-    })
-
 }
 export async function logoutAll(req, res) {
 
